@@ -40,6 +40,9 @@ cachetools>=5.3.0  # Additional caching utilities
 # Data Validation
 pydantic>=2.0.0  # Data models and validation
 
+# Firebase Realtime Database
+firebase-admin>=6.2.0  # Firebase Admin SDK for Python
+
 # Testing (Development)
 pytest>=7.4.0  # Testing framework
 pytest-asyncio>=0.21.0  # Async test support
