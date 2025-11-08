@@ -63,7 +63,27 @@ See [ERROR_HARDENING.md](ERROR_HARDENING.md) for complete error handling guide.
 └─────────────────────────────────────────────────────────┘
 ```
 
+## 🔥 Database Options
+
+This project supports two database backends:
+
+1. **PostgreSQL + TimescaleDB** (Recommended for production)
+   - Optimized for time-series data
+   - Complex SQL queries
+   - High performance at scale
+   - Self-hosted
+
+2. **Firebase Realtime Database** (Great for prototyping)
+   - Zero infrastructure management
+   - Built-in real-time sync
+   - Free tier available
+   - Cloud-hosted
+
+See [FIREBASE_SETUP.md](FIREBASE_SETUP.md) for Firebase setup guide.
+
 ## 🚀 Quick Start
+
+### Option 1: PostgreSQL Setup (Recommended)
 
 ### Prerequisites
 
@@ -136,20 +156,69 @@ python scripts/start_realtime_stream.py &
 python scripts/health_check.py
 ```
 
+### Option 2: Firebase Setup (Quick & Easy)
+
+For a quick start without setting up PostgreSQL:
+
+### Prerequisites
+
+- Python 3.9+
+- Google Account
+- Firebase project (free tier available)
+
+### 1. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Setup Firebase
+
+1. Create Firebase project at [Firebase Console](https://console.firebase.google.com/)
+2. Enable Realtime Database
+3. Download service account JSON file
+4. Configure `config.yaml`:
+
+```yaml
+firebase:
+  service_account_path: "firebase-service-account.json"
+  database_url: "https://your-project.firebaseio.com"
+```
+
+See [FIREBASE_SETUP.md](FIREBASE_SETUP.md) for detailed setup instructions.
+
+### 3. Run Data Collection
+
+```bash
+# Collect historical data
+python scripts/firebase_historical_collection.py
+
+# Start real-time streaming
+python scripts/firebase_realtime_stream.py
+```
+
+**📘 Complete Firebase guide:** [FIREBASE_SETUP.md](FIREBASE_SETUP.md)
+
 ## 📁 Project Structure
 
 ```
 p1_dataCollection/
 ├── Claude.md                    # Comprehensive documentation
 ├── README.md                    # This file
+├── FIREBASE_SETUP.md            # Firebase setup guide
 ├── config.yaml                  # Configuration
 ├── requirements.txt             # Python dependencies
 │
 ├── data_collector/              # Data collection modules
 │   ├── __init__.py
 │   ├── binance_client.py        # Binance API client
-│   ├── historical_collector.py  # Historical data collector
-│   └── websocket_streamer.py    # Real-time WebSocket streamer
+│   ├── historical_collector.py  # Historical data collector (PostgreSQL)
+│   ├── websocket_streamer.py    # Real-time WebSocket streamer (PostgreSQL)
+│   ├── firebase_collector.py    # Historical collector (Firebase)
+│   └── firebase_websocket.py    # Real-time streamer (Firebase)
+│
+├── database/                    # Database managers
+│   └── firebase_manager.py      # Firebase Realtime Database manager
 │
 ├── data_quality/                # Data validation
 │   ├── __init__.py
@@ -159,10 +228,12 @@ p1_dataCollection/
 │   └── create_tables.sql        # TimescaleDB table definitions
 │
 ├── scripts/                     # Executable scripts
-│   ├── init_database.py         # Database initialization
-│   ├── main_historical_collection.py  # Historical data collection
-│   ├── start_realtime_stream.py       # Real-time streaming
-│   └── health_check.py          # System health monitoring
+│   ├── init_database.py                    # Database initialization (PostgreSQL)
+│   ├── main_historical_collection.py       # Historical collection (PostgreSQL)
+│   ├── start_realtime_stream.py            # Real-time streaming (PostgreSQL)
+│   ├── firebase_historical_collection.py   # Historical collection (Firebase)
+│   ├── firebase_realtime_stream.py         # Real-time streaming (Firebase)
+│   └── health_check.py                     # System health monitoring
 │
 └── logs/                        # Application logs
     └── .gitkeep

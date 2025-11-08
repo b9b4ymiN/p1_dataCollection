@@ -20,6 +20,11 @@ redis:
   db: 0
   password: ""  # Leave empty if no password
 
+firebase:
+  # Firebase Realtime Database configuration (optional - alternative to PostgreSQL)
+  service_account_path: ""  # Path to Firebase service account JSON file
+  database_url: ""  # Firebase Realtime Database URL (e.g., https://your-project.firebaseio.com)
+
 collection:
   symbols:
     - "SOL/USDT"
