@@ -129,6 +129,21 @@ class SQLiteManager:
             )
         """)
 
+        # Order Book table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS order_book (
+                time TIMESTAMP NOT NULL,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                level INTEGER NOT NULL,
+                price REAL NOT NULL,
+                quantity REAL NOT NULL,
+                PRIMARY KEY (time, symbol, side, level)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ob_symbol_time ON order_book (symbol, time)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ob_side_level ON order_book (side, level)")
+
     # =============================================================================
     # OHLCV Operations
     # =============================================================================
@@ -380,6 +395,109 @@ class SQLiteManager:
             query += f" AND time <= '{end_time.isoformat()}'"
 
         query += " ORDER BY time"
+
+        loop = asyncio.get_event_loop()
+        df = await loop.run_in_executor(
+            self.executor,
+            lambda: pd.read_sql_query(query, sqlite3.connect(self.database_path))
+        )
+
+        if not df.empty:
+            df['time'] = pd.to_datetime(df['time'])
+
+        return df
+
+    # =============================================================================
+    # Order Book Operations
+    # =============================================================================
+
+    async def save_order_book_batch(self, df: pd.DataFrame, symbol: str):
+        """
+        Save Order Book snapshot to SQLite
+
+        Args:
+            df: DataFrame with order book data
+            symbol: Trading symbol
+        """
+        if df.empty:
+            return
+
+        df = df.copy()
+        df['symbol'] = symbol
+
+        # Rename timestamp column if exists
+        if 'timestamp' in df.columns:
+            df = df.rename(columns={'timestamp': 'time'})
+
+        # Ensure required columns
+        required_cols = ['time', 'symbol', 'side', 'level', 'price', 'quantity']
+        df = df[required_cols]
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            self.executor,
+            lambda: df.to_sql('order_book', sqlite3.connect(self.database_path),
+                             if_exists='append', index=False)
+        )
+
+        logger.info(f"✅ Saved {len(df)} order book records to SQLite: {symbol}")
+
+    async def get_order_book(self, symbol: str,
+                             start_time: Optional[datetime] = None,
+                             end_time: Optional[datetime] = None,
+                             limit_levels: int = 10) -> pd.DataFrame:
+        """
+        Retrieve Order Book snapshots from SQLite
+
+        Args:
+            symbol: Trading symbol
+            start_time: Start datetime
+            end_time: End datetime
+            limit_levels: Max levels to retrieve per side (default 10)
+
+        Returns:
+            DataFrame with order book data
+        """
+        query = f"SELECT * FROM order_book WHERE symbol = '{symbol}'"
+
+        if start_time:
+            query += f" AND time >= '{start_time.isoformat()}'"
+        if end_time:
+            query += f" AND time <= '{end_time.isoformat()}'"
+
+        # Limit levels
+        query += f" AND level < {limit_levels}"
+        query += " ORDER BY time, side, level"
+
+        loop = asyncio.get_event_loop()
+        df = await loop.run_in_executor(
+            self.executor,
+            lambda: pd.read_sql_query(query, sqlite3.connect(self.database_path))
+        )
+
+        if not df.empty:
+            df['time'] = pd.to_datetime(df['time'])
+
+        return df
+
+    async def get_latest_order_book(self, symbol: str, limit_levels: int = 10) -> pd.DataFrame:
+        """
+        Get the most recent order book snapshot
+
+        Args:
+            symbol: Trading symbol
+            limit_levels: Max levels to retrieve per side
+
+        Returns:
+            DataFrame with latest order book
+        """
+        query = f"""
+            SELECT * FROM order_book
+            WHERE symbol = '{symbol}'
+            AND time = (SELECT MAX(time) FROM order_book WHERE symbol = '{symbol}')
+            AND level < {limit_levels}
+            ORDER BY side, level
+        """
 
         loop = asyncio.get_event_loop()
         df = await loop.run_in_executor(

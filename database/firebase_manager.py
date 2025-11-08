@@ -354,6 +354,205 @@ class FirebaseManager:
         return df.sort_values('time')
 
     # =============================================================================
+    # Order Book Operations
+    # =============================================================================
+
+    async def save_order_book_batch(self, df: pd.DataFrame, symbol: str):
+        """
+        Save Order Book snapshot to Firebase
+
+        Args:
+            df: DataFrame with order book data
+            symbol: Trading symbol
+        """
+        if df.empty:
+            return
+
+        safe_symbol = symbol.replace('/', '_')
+
+        # Get timestamp from first row
+        if 'timestamp' in df.columns:
+            timestamp = int(df['timestamp'].iloc[0].timestamp() * 1000)
+        elif 'time' in df.columns:
+            timestamp = int(df['time'].iloc[0].timestamp() * 1000)
+        else:
+            timestamp = int(datetime.now().timestamp() * 1000)
+
+        base_path = f'futures_data/{safe_symbol}/order_book/{timestamp}'
+
+        # Prepare batch data - separate bids and asks
+        bids_data = {}
+        asks_data = {}
+
+        for _, row in df.iterrows():
+            level = int(row['level'])
+            record = {
+                'price': float(row['price']),
+                'quantity': float(row['quantity'])
+            }
+
+            if row['side'] == 'BID':
+                bids_data[str(level)] = record
+            elif row['side'] == 'ASK':
+                asks_data[str(level)] = record
+
+        # Save bids and asks
+        batch_data = {
+            'bids': bids_data,
+            'asks': asks_data,
+            'timestamp': timestamp
+        }
+
+        # Add spread info if available in df attributes
+        if hasattr(df, 'attrs'):
+            if 'best_bid' in df.attrs:
+                batch_data['best_bid'] = float(df.attrs['best_bid'])
+            if 'best_ask' in df.attrs:
+                batch_data['best_ask'] = float(df.attrs['best_ask'])
+            if 'spread' in df.attrs:
+                batch_data['spread'] = float(df.attrs['spread'])
+            if 'mid_price' in df.attrs:
+                batch_data['mid_price'] = float(df.attrs['mid_price'])
+
+        await self._async_batch_update(base_path, batch_data)
+        logger.info(f"✅ Saved order book snapshot to Firebase: {symbol}")
+
+    async def get_order_book(self, symbol: str,
+                             start_time: Optional[datetime] = None,
+                             end_time: Optional[datetime] = None,
+                             limit_levels: int = 10) -> pd.DataFrame:
+        """
+        Retrieve Order Book snapshots from Firebase
+
+        Args:
+            symbol: Trading symbol
+            start_time: Start datetime
+            end_time: End datetime
+            limit_levels: Max levels to retrieve per side
+
+        Returns:
+            DataFrame with order book data
+        """
+        safe_symbol = symbol.replace('/', '_')
+        path = f'futures_data/{safe_symbol}/order_book'
+
+        data = await self._async_get(path)
+        if not data:
+            return pd.DataFrame()
+
+        all_records = []
+
+        for timestamp_key, snapshot in data.items():
+            timestamp = pd.to_datetime(int(timestamp_key), unit='ms')
+
+            # Skip if outside time range
+            if start_time and timestamp < start_time:
+                continue
+            if end_time and timestamp > end_time:
+                continue
+
+            # Process bids
+            if 'bids' in snapshot:
+                for level_str, record in snapshot['bids'].items():
+                    level = int(level_str)
+                    if level < limit_levels:
+                        all_records.append({
+                            'time': timestamp,
+                            'side': 'BID',
+                            'level': level,
+                            'price': record['price'],
+                            'quantity': record['quantity']
+                        })
+
+            # Process asks
+            if 'asks' in snapshot:
+                for level_str, record in snapshot['asks'].items():
+                    level = int(level_str)
+                    if level < limit_levels:
+                        all_records.append({
+                            'time': timestamp,
+                            'side': 'ASK',
+                            'level': level,
+                            'price': record['price'],
+                            'quantity': record['quantity']
+                        })
+
+        df = pd.DataFrame(all_records)
+
+        if not df.empty:
+            df = df.sort_values(['time', 'side', 'level'])
+
+        return df
+
+    async def get_latest_order_book(self, symbol: str, limit_levels: int = 10) -> pd.DataFrame:
+        """
+        Get the most recent order book snapshot
+
+        Args:
+            symbol: Trading symbol
+            limit_levels: Max levels to retrieve per side
+
+        Returns:
+            DataFrame with latest order book
+        """
+        safe_symbol = symbol.replace('/', '_')
+        path = f'futures_data/{safe_symbol}/order_book'
+
+        data = await self._async_get(path)
+        if not data:
+            return pd.DataFrame()
+
+        # Get latest timestamp
+        latest_timestamp = max(data.keys(), key=lambda x: int(x))
+        snapshot = data[latest_timestamp]
+        timestamp = pd.to_datetime(int(latest_timestamp), unit='ms')
+
+        records = []
+
+        # Process bids
+        if 'bids' in snapshot:
+            for level_str, record in snapshot['bids'].items():
+                level = int(level_str)
+                if level < limit_levels:
+                    records.append({
+                        'time': timestamp,
+                        'side': 'BID',
+                        'level': level,
+                        'price': record['price'],
+                        'quantity': record['quantity']
+                    })
+
+        # Process asks
+        if 'asks' in snapshot:
+            for level_str, record in snapshot['asks'].items():
+                level = int(level_str)
+                if level < limit_levels:
+                    records.append({
+                        'time': timestamp,
+                        'side': 'ASK',
+                        'level': level,
+                        'price': record['price'],
+                        'quantity': record['quantity']
+                    })
+
+        df = pd.DataFrame(records)
+
+        if not df.empty:
+            df = df.sort_values(['side', 'level'])
+
+            # Add spread info if available
+            if 'best_bid' in snapshot:
+                df.attrs['best_bid'] = snapshot['best_bid']
+            if 'best_ask' in snapshot:
+                df.attrs['best_ask'] = snapshot['best_ask']
+            if 'spread' in snapshot:
+                df.attrs['spread'] = snapshot['spread']
+            if 'mid_price' in snapshot:
+                df.attrs['mid_price'] = snapshot['mid_price']
+
+        return df
+
+    # =============================================================================
     # Utility Methods
     # =============================================================================
 

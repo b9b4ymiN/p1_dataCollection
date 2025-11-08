@@ -219,3 +219,69 @@ class BinanceFuturesClient:
         except Exception as e:
             self.logger.error(f"Error fetching trader ratio: {e}")
             raise
+
+    async def fetch_order_book(
+        self,
+        symbol: str,
+        limit: int = 100
+    ) -> pd.DataFrame:
+        """
+        Fetch order book depth (market depth)
+
+        Args:
+            symbol: Trading pair (e.g., 'SOL/USDT')
+            limit: Depth limit (5, 10, 20, 50, 100, 500, 1000)
+
+        Returns:
+            DataFrame with order book snapshot (bids and asks)
+        """
+        try:
+            # Fetch order book
+            order_book = await self.exchange.fetch_order_book(
+                symbol=symbol,
+                limit=limit
+            )
+
+            timestamp = pd.to_datetime(order_book['timestamp'], unit='ms')
+
+            # Process bids (buy orders)
+            bids_df = pd.DataFrame(
+                order_book['bids'],
+                columns=['price', 'quantity']
+            )
+            bids_df['side'] = 'BID'
+            bids_df['timestamp'] = timestamp
+            bids_df['level'] = range(len(bids_df))  # 0 = best bid
+
+            # Process asks (sell orders)
+            asks_df = pd.DataFrame(
+                order_book['asks'],
+                columns=['price', 'quantity']
+            )
+            asks_df['side'] = 'ASK'
+            asks_df['timestamp'] = timestamp
+            asks_df['level'] = range(len(asks_df))  # 0 = best ask
+
+            # Combine
+            df = pd.concat([bids_df, asks_df], ignore_index=True)
+            df['price'] = df['price'].astype(float)
+            df['quantity'] = df['quantity'].astype(float)
+
+            # Add spread information
+            if not bids_df.empty and not asks_df.empty:
+                best_bid = bids_df['price'].iloc[0]
+                best_ask = asks_df['price'].iloc[0]
+                spread = best_ask - best_bid
+                spread_bps = (spread / best_bid) * 10000  # basis points
+
+                df.attrs['best_bid'] = best_bid
+                df.attrs['best_ask'] = best_ask
+                df.attrs['spread'] = spread
+                df.attrs['spread_bps'] = spread_bps
+                df.attrs['mid_price'] = (best_bid + best_ask) / 2
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Error fetching order book: {e}")
+            raise
