@@ -1,6 +1,15 @@
 # Configuration file for Phase 1 Data Collection
 # Replace placeholder values with your actual credentials
 
+# =============================================================================
+# Database Configuration
+# =============================================================================
+# Choose your database backend: sqlite, firebase, or postgresql
+# - sqlite: Lightweight, file-based (great for development/testing)
+# - firebase: Cloud-hosted, zero infrastructure (great for prototyping)
+# - postgresql: High-performance time-series (recommended for production)
+database_type: "sqlite"  # Options: sqlite, firebase, postgresql
+
 binance:
   api_key: ""  # Optional for public data (leave empty for public endpoints)
   api_secret: ""  # Optional for public data
@@ -21,9 +30,13 @@ redis:
   password: ""  # Leave empty if no password
 
 firebase:
-  # Firebase Realtime Database configuration (optional - alternative to PostgreSQL)
+  # Firebase Realtime Database configuration (used when database_type: firebase)
   service_account_path: ""  # Path to Firebase service account JSON file
   database_url: ""  # Firebase Realtime Database URL (e.g., https://your-project.firebaseio.com)
+
+sqlite:
+  # SQLite configuration (used when database_type: sqlite)
+  database_path: "data/futures_data.db"  # Path to SQLite database file
 
 collection:
   symbols:

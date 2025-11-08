@@ -65,25 +65,63 @@ See [ERROR_HARDENING.md](ERROR_HARDENING.md) for complete error handling guide.
 
 ## 🔥 Database Options
 
-This project supports two database backends:
+This project supports **three database backends** that you can switch between with a single configuration change:
 
-1. **PostgreSQL + TimescaleDB** (Recommended for production)
-   - Optimized for time-series data
-   - Complex SQL queries
-   - High performance at scale
-   - Self-hosted
+1. **SQLite** (Best for local development)
+   - ⚡ Zero setup - just works
+   - 📁 Single file database
+   - 🔧 Perfect for testing and development
+   - 💾 Unlimited storage (disk-based)
 
-2. **Firebase Realtime Database** (Great for prototyping)
-   - Zero infrastructure management
-   - Built-in real-time sync
-   - Free tier available
-   - Cloud-hosted
+2. **Firebase Realtime Database** (Best for prototyping)
+   - ☁️ Cloud-hosted, zero infrastructure
+   - 🔄 Built-in real-time sync
+   - 💰 Free tier (1GB storage)
+   - 📱 Access from anywhere
 
-See [FIREBASE_SETUP.md](FIREBASE_SETUP.md) for Firebase setup guide.
+3. **PostgreSQL + TimescaleDB** (Best for production)
+   - 🚀 Optimized for time-series data
+   - 💪 Complex SQL queries
+   - ⚡ High performance at scale
+   - 🏢 Production-ready
+
+### Quick Switch
+
+Edit `config.yaml`:
+```yaml
+database_type: "sqlite"  # or "firebase" or "postgresql"
+```
+
+Then run:
+```bash
+python scripts/unified_historical_collection.py
+```
+
+**📘 Complete guide:** [DATABASE_SWITCHING.md](DATABASE_SWITCHING.md)
+**🔥 Firebase setup:** [FIREBASE_SETUP.md](FIREBASE_SETUP.md)
 
 ## 🚀 Quick Start
 
-### Option 1: PostgreSQL Setup (Recommended)
+### Option 0: SQLite Setup (Fastest - Recommended for Getting Started)
+
+The easiest way to get started - no database server required!
+
+```bash
+# 1. Install Python dependencies
+pip install -r requirements.txt
+
+# 2. Configure (edit config.yaml)
+database_type: "sqlite"
+
+# 3. Run collection
+python scripts/unified_historical_collection.py
+```
+
+Done! Your data is stored in `data/futures_data.db`.
+
+**📘 See:** [DATABASE_SWITCHING.md](DATABASE_SWITCHING.md) for more options
+
+### Option 1: PostgreSQL Setup (Production)
 
 ### Prerequisites
 
