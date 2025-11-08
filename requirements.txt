@@ -6,9 +6,11 @@ numpy>=1.24.0
 # Database
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0
+asyncpg>=0.29.0  # Async PostgreSQL driver for high performance
 
 # Redis
 redis>=5.0.0
+hiredis>=2.2.0  # C parser for Redis (faster)
 
 # WebSocket
 websocket-client>=1.6.0
@@ -16,6 +18,7 @@ websocket-client>=1.6.0
 # Async support
 asyncio
 aiohttp>=3.8.0
+uvloop>=0.19.0  # Fast event loop implementation
 
 # Progress bars
 tqdm>=4.65.0
@@ -28,3 +31,20 @@ python-json-logger>=2.0.0
 
 # Utilities
 python-dotenv>=1.0.0
+
+# Performance Optimizations
+msgpack>=1.0.7  # Binary serialization for cache
+psutil>=5.9.0  # System monitoring
+cachetools>=5.3.0  # Additional caching utilities
+
+# Data Validation
+pydantic>=2.0.0  # Data models and validation
+
+# Firebase Realtime Database
+firebase-admin>=6.2.0  # Firebase Admin SDK for Python
+
+# Testing (Development)
+pytest>=7.4.0  # Testing framework
+pytest-asyncio>=0.21.0  # Async test support
+pytest-cov>=4.1.0  # Coverage reporting
+pytest-mock>=3.11.0  # Mocking support

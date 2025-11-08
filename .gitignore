@@ -205,3 +205,56 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Project-specific
+# =============================================================================
+
+# Logs
+logs/*.log
+logs/**/*.log
+
+# Data files
+data/
+*.csv
+*.parquet
+*.h5
+*.hdf5
+
+# Config with secrets
+config.yaml
+config.yml
+!config.yaml.example
+
+# Error reports
+error_reports/
+*_errors.json
+bandit-report.json
+
+# Docker volumes
+postgres_data/
+redis_data/
+grafana_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Backup files
+*.bak
+*.backup
+
+# Database dumps
+*.sql.gz
+*.dump
