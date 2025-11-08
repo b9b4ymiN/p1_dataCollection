@@ -1,0 +1,30 @@
+# Core Dependencies
+ccxt>=4.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Database
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+
+# Redis
+redis>=5.0.0
+
+# WebSocket
+websocket-client>=1.6.0
+
+# Async support
+asyncio
+aiohttp>=3.8.0
+
+# Progress bars
+tqdm>=4.65.0
+
+# Configuration
+pyyaml>=6.0
+
+# Logging
+python-json-logger>=2.0.0
+
+# Utilities
+python-dotenv>=1.0.0
