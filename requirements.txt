@@ -36,3 +36,12 @@ python-dotenv>=1.0.0
 msgpack>=1.0.7  # Binary serialization for cache
 psutil>=5.9.0  # System monitoring
 cachetools>=5.3.0  # Additional caching utilities
+
+# Data Validation
+pydantic>=2.0.0  # Data models and validation
+
+# Testing (Development)
+pytest>=7.4.0  # Testing framework
+pytest-asyncio>=0.21.0  # Async test support
+pytest-cov>=4.1.0  # Coverage reporting
+pytest-mock>=3.11.0  # Mocking support

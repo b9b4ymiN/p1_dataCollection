@@ -1,0 +1,137 @@
+version: '3.8'
+
+services:
+  # PostgreSQL + TimescaleDB
+  postgres:
+    image: timescale/timescaledb:latest-pg14
+    container_name: futures_db
+    environment:
+      POSTGRES_DB: futures_db
+      POSTGRES_USER: ${POSTGRES_USER:-futures_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=timescaledb"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schemas/create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-futures_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - data_collection
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: futures_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - data_collection
+
+  # Data Collector
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: futures_collector
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./config.yaml:/app/config.yaml:ro
+    command: python scripts/optimized_collection.py
+    restart: unless-stopped
+    networks:
+      - data_collection
+
+  # Real-time WebSocket Streamer
+  streamer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: futures_streamer
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./config.yaml:/app/config.yaml:ro
+    command: python scripts/start_realtime_stream.py
+    restart: unless-stopped
+    networks:
+      - data_collection
+
+  # Error Monitor (optional)
+  monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: futures_monitor
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs:ro
+    command: python scripts/error_monitor.py --interval 30
+    restart: unless-stopped
+    networks:
+      - data_collection
+    profiles:
+      - monitoring  # Only run with: docker-compose --profile monitoring up
+
+  # Grafana (optional monitoring dashboard)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: futures_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: "grafana-clock-panel,grafana-simple-json-datasource"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    networks:
+      - data_collection
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  data_collection:
+    driver: bridge
