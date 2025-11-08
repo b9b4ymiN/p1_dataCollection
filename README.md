@@ -33,6 +33,17 @@ All data is stored in a TimescaleDB database optimized for time-series analysis.
 
 See [PERFORMANCE.md](PERFORMANCE.md) for detailed optimization guide.
 
+## 🛡️ Error Hardening & Resilience
+
+- 🔄 **Automatic retry** with exponential backoff (5 attempts)
+- ⚡ **Circuit breakers** prevent cascading failures
+- 📊 **Error tracking** with counters and metrics
+- 🚨 **Real-time error monitoring** dashboard
+- 🔧 **Automatic recovery** from transient failures
+- 📈 **Error alerting** when thresholds exceeded
+
+See [ERROR_HARDENING.md](ERROR_HARDENING.md) for complete error handling guide.
+
 ## 🏗️ Architecture
 
 ```
