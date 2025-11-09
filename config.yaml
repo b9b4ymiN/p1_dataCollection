@@ -66,3 +66,61 @@ logging:
   file: "logs/data_collection.log"
   max_bytes: 10485760  # 10MB
   backup_count: 5
+
+# =============================================================================
+# Phase 2 ML Feature Engineering Configuration
+# =============================================================================
+phase2:
+  # Path to p2_mlFeature repository (update this!)
+  repo_path: "C:/path/to/p2_mlFeature"  # <-- UPDATE WITH YOUR ACTUAL PATH
+  
+  # Feature engineering settings
+  feature_engineering:
+    lookback_periods:  # Used for rolling calculations
+      - 20
+      - 50
+      - 100
+      - 200
+    divergence_periods:  # OI-Price divergence detection periods
+      - 20   # ~1.5 hours (20 * 5min)
+      - 48   # 4 hours
+      - 288  # 24 hours
+  
+  # Target variable settings
+  target_engineering:
+    horizon: 48              # Prediction horizon (48 5-min bars = 4 hours)
+    threshold: 0.01          # Minimum price move threshold (1%)
+    n_classes: 3             # Number of classes: 0=SHORT, 1=NEUTRAL, 2=LONG
+    regression_horizons:     # For regression targets
+      - 12   # 1 hour
+      - 48   # 4 hours
+      - 288  # 24 hours
+  
+  # Feature selection settings
+  feature_selection:
+    n_features: 50                    # Number of features to select
+    correlation_threshold: 0.9        # Remove features with correlation > 0.9
+    variance_threshold: 0.001         # Remove low-variance features
+    selection_method: "combined"      # Options: importance, shap, permutation, combined
+  
+  # Data splitting settings (time-series aware)
+  data_split:
+    train_ratio: 0.6                  # 60% for training
+    val_ratio: 0.2                    # 20% for validation
+    test_ratio: 0.2                   # 20% for testing
+    purge_periods: 0                  # Periods to purge from train end
+    embargo_periods: 0                # Periods to embargo from val/test start
+  
+  # Feature store settings (for live trading)
+  feature_store:
+    enabled: true
+    backend: "redis"                  # Options: redis, file
+    file_path: "data/feature_store"   # Path for file-based store
+    ttl_seconds: 86400                # Time-to-live for cached features (24h)
+  
+  # Output settings
+  output:
+    save_format: "parquet"            # Options: parquet, csv, hdf5
+    save_path: "data/phase2_output"
+    save_selected_only: true          # Only save selected features (smaller files)
+    save_importance: true             # Save feature importance scores
