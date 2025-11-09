@@ -18,15 +18,19 @@ Prerequisites:
 import sys
 import os
 from pathlib import Path
+import pandas as pd
+import yaml
+from datetime import datetime, timedelta
 
 # ============================================================
 # CONFIGURATION - UPDATE THIS PATH
 # ============================================================
-P2_REPO_PATH = r"C:\path\to\p2_mlFeature"  # <-- CHANGE THIS!
+P2_REPO_PATH = r"C:\Programing\ByAI\claude-code\p2_mlFeature"
 # Recommended Phase 1 DB name (matches container config)
 P1_DB_NAME = "futures_db"
 
-# Add p2_mlFeature to Python path
+
+# Add p2_mlFeature to Python path FIRST
 if os.path.exists(P2_REPO_PATH):
     sys.path.insert(0, P2_REPO_PATH)
     print(f"✓ Added p2_mlFeature to path: {P2_REPO_PATH}")
@@ -35,25 +39,61 @@ else:
     print("Please clone the repo and update P2_REPO_PATH in this script.")
     sys.exit(1)
 
-# ============================================================
+# Fix typing imports for Phase 2 (Python 3.12 compatibility)
+import typing
+if not hasattr(typing, 'Dict'):
+    typing.Dict = dict
+if not hasattr(typing, 'Tuple'):
+    typing.Tuple = tuple
+if not hasattr(typing, 'List'):
+    typing.List = list
 
-import pandas as pd
-import yaml
-from datetime import datetime, timedelta
-
-# Phase 1 imports (from this repo)
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from features.data_loader import MarketDataLoader
-
-# Phase 2 imports (from p2_mlFeature repo)
+# Phase 2 imports (from p2_mlFeature repo) - import and save before adding Phase 1 path
 try:
-    from features import FeatureEngineer, TargetEngineer
-    from utils import select_features_combined, analyze_feature_importance
-except ImportError as e:
+    import features as p2_features
+    import utils as p2_utils
+    FeatureEngineer = p2_features.feature_engineer.FeatureEngineer
+    TargetEngineer = p2_features.target_engineer.TargetEngineer
+    select_features_combined = p2_utils.feature_selection.select_features_combined
+    # analyze_feature_importance might not exist in Phase 2, we'll create a simple version
+    try:
+        analyze_feature_importance = p2_utils.feature_analysis.analyze_feature_importance
+    except AttributeError:
+        # Create a simple fallback
+        def analyze_feature_importance(X, y, task_type='classification', top_n=10):
+            from sklearn.ensemble import RandomForestClassifier
+            model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+            model.fit(X, y)
+            importance_df = pd.DataFrame({
+                'feature': X.columns,
+                'importance': model.feature_importances_
+            }).sort_values('importance', ascending=False).reset_index(drop=True)
+            print("\nFEATURE IMPORTANCE ANALYSIS")
+            print(f"Top {top_n} Most Important Features:")
+            for idx, row in importance_df.head(top_n).iterrows():
+                print(f"  {idx+1}. {row['feature']:40s} {row['importance']:.4f}")
+            return importance_df
+        analyze_feature_importance = analyze_feature_importance
+    print("✓ Phase 2 modules imported successfully")
+except Exception as e:
     print(f"❌ ERROR importing Phase 2 modules: {e}")
     print("Make sure p2_mlFeature repo is properly set up with dependencies installed.")
     print("Run: pip install pandas-ta scikit-learn scipy")
+    import traceback
+    traceback.print_exc()
     sys.exit(1)
+
+# Now import Phase 1's MarketDataLoader using absolute path
+p1_repo_path = str(Path(__file__).parent.parent)
+sys.path.append(p1_repo_path)  # Add to end, not beginning
+# Import MarketDataLoader from absolute file path
+import importlib.util
+spec = importlib.util.spec_from_file_location("p1_features.data_loader", 
+                                                os.path.join(p1_repo_path, "features", "data_loader.py"))
+p1_data_loader = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(p1_data_loader)
+MarketDataLoader = p1_data_loader.MarketDataLoader
+print("✓ Phase 1 MarketDataLoader imported successfully")
 
 
 def main():
@@ -72,8 +112,14 @@ def main():
     with open(config_path) as f:
         config = yaml.safe_load(f)
     
+    # Override database host for host machine access (Docker exposes on localhost:5432)
+    db_config = config['database'].copy()
+    if db_config.get('host') == 'postgres':
+        db_config['host'] = 'localhost'
+        print("  (Using localhost to connect to Docker DB from host machine)")
+    
     # Initialize data loader
-    loader = MarketDataLoader(config['database'])
+    loader = MarketDataLoader(db_config)
     
     # Define date range (last 30 days)
     end_date = datetime.now()
@@ -246,6 +292,13 @@ def main():
         y = y[valid_mask]
         
         print(f"  Valid samples: {len(X):,}")
+        
+        # Clean data: replace inf/-inf with NaN, then forward-fill and fill remaining with 0
+        print("  Cleaning infinity and NaN values...")
+        X = X.replace([float('inf'), float('-inf')], pd.NA)
+        X = X.ffill().fillna(0)
+        
+        print(f"  After cleaning: {len(X):,} samples, {len(X.columns)} features")
         
         # Time-series split (first 60% for training)
         train_idx = int(len(X) * 0.6)

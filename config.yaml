@@ -72,7 +72,7 @@ logging:
 # =============================================================================
 phase2:
   # Path to p2_mlFeature repository (update this!)
-  repo_path: "C:/path/to/p2_mlFeature"  # <-- UPDATE WITH YOUR ACTUAL PATH
+  repo_path: "C:/Programing/ByAI/claude-code/p2_mlFeature"
   
   # Feature engineering settings
   feature_engineering:

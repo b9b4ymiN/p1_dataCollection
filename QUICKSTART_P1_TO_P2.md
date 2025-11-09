@@ -335,7 +335,7 @@ p2_mlFeature/                                      # ← Clone this repo
 
 1. **Check logs:** `logs/data_collection.log`
 2. **Docker status:** `docker ps` and `docker logs futures_collector`
-3. **Database query:** `docker exec -it futures_db psql -U futures_user -d futures_data`
+3. **Database query:** `docker exec -it futures_db psql -U futures_user -d futures_db`
 4. **Python errors:** Read stack trace carefully, usually import or path issues
 
 ---

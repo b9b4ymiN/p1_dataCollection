@@ -1,10 +1,8 @@
 """
-Feature Engineering Module
-Transforms raw market data into ML-ready features
+Phase 1 Features Module
+Bridge between Phase 1 data collection and Phase 2 feature engineering
 """
 
-from .feature_engineer import FeatureEngineer
-from .feature_store import FeatureStore
-from .feature_selector import FeatureSelector
+from .data_loader import MarketDataLoader
 
-__all__ = ['FeatureEngineer', 'FeatureStore', 'FeatureSelector']
+__all__ = ['MarketDataLoader']
