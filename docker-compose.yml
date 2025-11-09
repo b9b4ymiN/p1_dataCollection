@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL + TimescaleDB
   postgres:
@@ -9,14 +7,20 @@ services:
       POSTGRES_DB: futures_db
       POSTGRES_USER: ${POSTGRES_USER:-futures_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=timescaledb"
+      TIMESCALEDB_TELEMETRY: "off"
+    command: ["-c", "shared_preload_libraries=timescaledb"] # Enable TimescaleDB
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./schemas/create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-futures_user}"]
+      # Ensure pg_isready checks the actual database (POSTGRES_DB) instead of
+      # defaulting to a database named after the user. Without -d the client
+      # may attempt to connect to a DB named after the user, causing
+      # "database \"futures_user\" does not exist" errors and making the
+      # container unhealthy.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-futures_user} -d ${POSTGRES_DB:-futures_db}"]
       interval: 10s
       timeout: 5s
       retries: 5

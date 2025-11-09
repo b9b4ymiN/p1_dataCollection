@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS liquidations (
     side VARCHAR(10),
     price NUMERIC(18, 8),
     quantity NUMERIC(20, 8),
-    order_id BIGINT UNIQUE
+    order_id BIGINT,
+    PRIMARY KEY (time, symbol, side)
 );
 
 -- Convert to hypertable
@@ -86,7 +87,25 @@ CREATE TABLE IF NOT EXISTS long_short_ratio (
 -- Convert to hypertable
 SELECT create_hypertable('long_short_ratio', 'time', if_not_exists => TRUE);
 
--- Table 6: Data Versions (for tracking)
+docker compose restart collector-- Table 6: Order Book Depth
+CREATE TABLE IF NOT EXISTS order_book (
+    time TIMESTAMPTZ NOT NULL,
+    symbol VARCHAR(20) NOT NULL,
+    side VARCHAR(10) NOT NULL,
+    price NUMERIC(18, 8) NOT NULL,
+    quantity NUMERIC(20, 8),
+    last_update_id BIGINT,
+    PRIMARY KEY (time, symbol, side, price)
+);
+
+-- Convert to hypertable
+SELECT create_hypertable('order_book', 'time', if_not_exists => TRUE);
+
+-- Create indexes for faster queries
+CREATE INDEX IF NOT EXISTS idx_orderbook_symbol_time ON order_book (symbol, time DESC);
+CREATE INDEX IF NOT EXISTS idx_orderbook_side ON order_book (side, time DESC);
+
+-- Table 7: Data Versions (for tracking)
 CREATE TABLE IF NOT EXISTS data_versions (
     id SERIAL PRIMARY KEY,
     table_name VARCHAR(50),
@@ -126,11 +145,22 @@ CREATE INDEX IF NOT EXISTS idx_oi_price_1h_bucket ON oi_price_1h (bucket DESC, s
 --     schedule_interval => INTERVAL '5 minutes');
 
 -- Compression policy (compress data older than 7 days)
+-- Enable compression on each hypertable before adding a compression policy.
+-- TimescaleDB requires the hypertable to have compression enabled prior
+-- to adding a compression policy; otherwise add_compression_policy fails.
+ALTER TABLE ohlcv SET (timescaledb.compress = true);
+ALTER TABLE open_interest SET (timescaledb.compress = true);
+ALTER TABLE funding_rate SET (timescaledb.compress = true);
+ALTER TABLE liquidations SET (timescaledb.compress = true);
+ALTER TABLE long_short_ratio SET (timescaledb.compress = true);
+ALTER TABLE order_book SET (timescaledb.compress = true);
+
 SELECT add_compression_policy('ohlcv', INTERVAL '7 days', if_not_exists => TRUE);
 SELECT add_compression_policy('open_interest', INTERVAL '7 days', if_not_exists => TRUE);
 SELECT add_compression_policy('funding_rate', INTERVAL '7 days', if_not_exists => TRUE);
 SELECT add_compression_policy('liquidations', INTERVAL '7 days', if_not_exists => TRUE);
 SELECT add_compression_policy('long_short_ratio', INTERVAL '7 days', if_not_exists => TRUE);
+SELECT add_compression_policy('order_book', INTERVAL '7 days', if_not_exists => TRUE);
 
 -- Retention policy (optional - uncomment to auto-delete old data)
 -- SELECT add_retention_policy('ohlcv', INTERVAL '1 year', if_not_exists => TRUE);
@@ -141,4 +171,5 @@ COMMENT ON TABLE open_interest IS 'Open interest data from Binance Futures';
 COMMENT ON TABLE funding_rate IS 'Funding rate history';
 COMMENT ON TABLE liquidations IS 'Liquidation orders (forced closures)';
 COMMENT ON TABLE long_short_ratio IS 'Top trader long/short account ratio';
+COMMENT ON TABLE order_book IS 'Order book depth (bids and asks) snapshots';
 COMMENT ON TABLE data_versions IS 'Metadata for tracking data collection versions';

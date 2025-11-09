@@ -10,6 +10,7 @@ This project implements a comprehensive data collection system for cryptocurrenc
 - Funding rates
 - Liquidation data
 - Long/Short ratios
+- Order Book Depth (bids/asks)
 
 All data is stored in a TimescaleDB database optimized for time-series analysis.
 

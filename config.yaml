@@ -8,7 +8,7 @@
 # - sqlite: Lightweight, file-based (great for development/testing)
 # - firebase: Cloud-hosted, zero infrastructure (great for prototyping)
 # - postgresql: High-performance time-series (recommended for production)
-database_type: "sqlite"  # Options: sqlite, firebase, postgresql
+database_type: "postgresql"  # Options: sqlite, firebase, postgresql
 
 binance:
   api_key: ""  # Optional for public data (leave empty for public endpoints)
@@ -17,14 +17,14 @@ binance:
   rate_limit: 1200  # requests per minute
 
 database:
-  host: "localhost"
+  host: "postgres"
   port: 5432
   database: "futures_db"
-  user: "postgres"  # Change to your PostgreSQL username
-  password: "your_password"  # Change to your PostgreSQL password
+  user: "futures_user"
+  password: "Dasimoa@054"
 
 redis:
-  host: "localhost"
+  host: "redis"
   port: 6379
   db: 0
   password: ""  # Leave empty if no password
@@ -54,6 +54,12 @@ collection:
     - "15m"
     - "1h"
   historical_days: 180  # 6 months of historical data
+  
+  # Order Book collection settings (optional - high frequency data)
+  collect_order_book: true   # Set to true to enable order book collection
+  order_book:
+    limit: 100  # Number of bid/ask levels (5, 10, 20, 50, 100, 500, 1000)
+    interval_seconds: 60  # Snapshot interval (60 = 1 per minute)
 
 logging:
   level: "INFO"  # DEBUG, INFO, WARNING, ERROR

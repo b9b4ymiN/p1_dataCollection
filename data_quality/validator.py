@@ -156,6 +156,59 @@ class DataQualityMonitor:
 
         return checks
 
+    def validate_order_book(self, df: pd.DataFrame) -> Dict[str, bool]:
+        """
+        Validate order book data
+
+        Args:
+            df: DataFrame with order book data
+
+        Returns:
+            Dictionary with validation results
+        """
+        checks = {}
+
+        if df.empty:
+            logger.warning("DataFrame is empty")
+            return {'empty': True}
+
+        # Check for nulls
+        checks['no_nulls'] = not df.isnull().any().any()
+        if not checks['no_nulls']:
+            null_cols = df.columns[df.isnull().any()].tolist()
+            logger.warning(f"Null values found in columns: {null_cols}")
+
+        # Check positive prices and quantities
+        if 'price' in df.columns:
+            checks['positive_prices'] = (df['price'] > 0).all()
+        if 'quantity' in df.columns:
+            checks['positive_quantities'] = (df['quantity'] > 0).all()
+
+        # Check side values are valid
+        if 'side' in df.columns:
+            valid_sides = df['side'].isin(['bid', 'ask']).all()
+            checks['valid_sides'] = valid_sides
+            if not valid_sides:
+                logger.warning("Invalid side values found (should be 'bid' or 'ask')")
+
+        # Check for duplicates (same time, symbol, side, price)
+        duplicate_cols = ['time', 'symbol', 'side', 'price'] if all(c in df.columns for c in ['time', 'symbol', 'side', 'price']) else []
+        if duplicate_cols:
+            checks['no_duplicates'] = not df.duplicated(subset=duplicate_cols).any()
+            if not checks['no_duplicates']:
+                duplicates = df.duplicated(subset=duplicate_cols).sum()
+                logger.warning(f"Found {duplicates} duplicate entries")
+
+        # Check bid/ask separation (bids should exist, asks should exist)
+        if 'side' in df.columns:
+            has_bids = (df['side'] == 'bid').any()
+            has_asks = (df['side'] == 'ask').any()
+            checks['has_both_sides'] = has_bids and has_asks
+            if not checks['has_both_sides']:
+                logger.warning("Order book missing bid or ask side")
+
+        return checks
+
     @staticmethod
     def _get_expected_diff(timeframe: str) -> float:
         """

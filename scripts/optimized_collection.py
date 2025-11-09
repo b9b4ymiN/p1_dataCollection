@@ -154,6 +154,12 @@ async def main():
 
 if __name__ == "__main__":
     # Run with uvloop for better performance (if available)
+    # Ensure a minimal logger is available for the module-level scope so the
+    # uvloop message can be logged even before `setup_logging` runs inside
+    # `main()` (this prevents NameError: name 'logger' is not defined).
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+
     try:
         import uvloop
         uvloop.install()

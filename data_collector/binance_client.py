@@ -3,8 +3,9 @@ Binance Futures API Client
 Handles all API interactions with Binance Futures
 """
 
-import ccxt
+import ccxt.async_support as ccxt
 import asyncio
+import aiohttp
 from typing import List, Dict, Optional
 import pandas as pd
 from datetime import datetime, timedelta
@@ -31,8 +32,19 @@ class BinanceFuturesClient:
 
         if testnet:
             self.exchange.set_sandbox_mode(True)
+        self.testnet = testnet
+        # Provide a logger instance on the client so callers can use self.logger
+        self.logger = logger
 
-        self.logger = logging.getLogger(__name__)
+    async def _fapi_get(self, path: str, params: dict = None) -> dict:
+        """Helper to call Binance Futures public API endpoints (async)"""
+        base = 'https://testnet.binancefuture.com' if self.testnet else 'https://fapi.binance.com'
+        url = f"{base}{path}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=30) as resp:
+                resp.raise_for_status()
+                return await resp.json()
 
     async def fetch_ohlcv(
         self,
@@ -97,12 +109,16 @@ class BinanceFuturesClient:
                 'limit': limit
             }
 
-            response = await self.exchange.fapiPublicGetFuturesDataOpenInterestHist(params)
+            # Use public REST endpoint for open interest history
+            response = await self._fapi_get('/futures/data/openInterestHist', params)
 
             df = pd.DataFrame(response)
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df['sumOpenInterest'] = df['sumOpenInterest'].astype(float)
-            df['sumOpenInterestValue'] = df['sumOpenInterestValue'].astype(float)
+            if not df.empty and 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            if 'sumOpenInterest' in df.columns:
+                df['sumOpenInterest'] = df['sumOpenInterest'].astype(float)
+            if 'sumOpenInterestValue' in df.columns:
+                df['sumOpenInterestValue'] = df['sumOpenInterestValue'].astype(float)
 
             return df
 
@@ -135,11 +151,14 @@ class BinanceFuturesClient:
             if start_time:
                 params['startTime'] = start_time
 
-            response = await self.exchange.fapiPublicGetFundingRate(params)
+            # Funding rate endpoint
+            response = await self._fapi_get('/fapi/v1/fundingRate', params)
 
             df = pd.DataFrame(response)
-            df['fundingTime'] = pd.to_datetime(df['fundingTime'], unit='ms')
-            df['fundingRate'] = df['fundingRate'].astype(float)
+            if not df.empty and 'fundingTime' in df.columns:
+                df['fundingTime'] = pd.to_datetime(df['fundingTime'], unit='ms')
+            if 'fundingRate' in df.columns:
+                df['fundingRate'] = df['fundingRate'].astype(float)
 
             return df
 
@@ -168,12 +187,15 @@ class BinanceFuturesClient:
                 'limit': limit
             }
 
-            response = await self.exchange.fapiPublicGetAllForceOrders(params)
+            # Liquidations (all force orders)
+            response = await self._fapi_get('/fapi/v1/allForceOrders', params)
 
             df = pd.DataFrame(response)
-            if not df.empty:
+            if not df.empty and 'time' in df.columns:
                 df['time'] = pd.to_datetime(df['time'], unit='ms')
+            if 'price' in df.columns:
                 df['price'] = df['price'].astype(float)
+            if 'origQty' in df.columns:
                 df['origQty'] = df['origQty'].astype(float)
 
             return df
@@ -206,16 +228,77 @@ class BinanceFuturesClient:
                 'limit': limit
             }
 
-            response = await self.exchange.fapiPublicGetFuturesDataTopLongShortAccountRatio(params)
+            # Top long/short account ratio
+            response = await self._fapi_get('/futures/data/topLongShortAccountRatio', params)
 
             df = pd.DataFrame(response)
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df['longShortRatio'] = df['longShortRatio'].astype(float)
-            df['longAccount'] = df['longAccount'].astype(float)
-            df['shortAccount'] = df['shortAccount'].astype(float)
+            if not df.empty and 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            if 'longShortRatio' in df.columns:
+                df['longShortRatio'] = df['longShortRatio'].astype(float)
+            if 'longAccount' in df.columns:
+                df['longAccount'] = df['longAccount'].astype(float)
+            if 'shortAccount' in df.columns:
+                df['shortAccount'] = df['shortAccount'].astype(float)
 
             return df
 
         except Exception as e:
             self.logger.error(f"Error fetching trader ratio: {e}")
+            raise
+
+    async def fetch_order_book(
+        self,
+        symbol: str,
+        limit: int = 100
+    ) -> pd.DataFrame:
+        """
+        Fetch order book depth (bids and asks)
+
+        Args:
+            symbol: Trading pair (e.g., 'SOL/USDT')
+            limit: Depth levels (5, 10, 20, 50, 100, 500, 1000)
+
+        Returns:
+            DataFrame with order book data including bids/asks
+        """
+        try:
+            params = {
+                'symbol': symbol.replace('/', ''),
+                'limit': limit
+            }
+
+            # Order book depth endpoint
+            response = await self._fapi_get('/fapi/v1/depth', params)
+
+            # Convert bids and asks to DataFrames
+            bids = response.get('bids', [])
+            asks = response.get('asks', [])
+            
+            if not bids and not asks:
+                return pd.DataFrame()
+
+            # Create DataFrame for bids
+            bids_df = pd.DataFrame(bids, columns=['price', 'quantity'])
+            bids_df['side'] = 'bid'
+            
+            # Create DataFrame for asks
+            asks_df = pd.DataFrame(asks, columns=['price', 'quantity'])
+            asks_df['side'] = 'ask'
+
+            # Combine both sides
+            df = pd.concat([bids_df, asks_df], ignore_index=True)
+            
+            # Add metadata
+            df['last_update_id'] = response.get('lastUpdateId')
+            df['timestamp'] = pd.Timestamp.now(tz='UTC')
+            
+            # Convert types
+            df['price'] = df['price'].astype(float)
+            df['quantity'] = df['quantity'].astype(float)
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Error fetching order book: {e}")
             raise

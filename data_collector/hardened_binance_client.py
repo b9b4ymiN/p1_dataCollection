@@ -3,8 +3,9 @@ Hardened Binance Futures API Client
 Enhanced with error tracking, circuit breakers, and retry logic
 """
 
-import ccxt
+import ccxt.async_support as ccxt
 import asyncio
+import aiohttp
 from typing import List, Dict, Optional
 import pandas as pd
 from datetime import datetime, timedelta
@@ -46,7 +47,17 @@ class HardenedBinanceFuturesClient:
 
         if testnet:
             self.exchange.set_sandbox_mode(True)
+        self.testnet = testnet
 
+    async def _fapi_get(self, path: str, params: dict = None) -> dict:
+        """Helper to call Binance Futures public API endpoints (async)"""
+        base = 'https://testnet.binancefuture.com' if self.testnet else 'https://fapi.binance.com'
+        url = f"{base}{path}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=30) as resp:
+                resp.raise_for_status()
+                return await resp.json()
         self.error_tracker = get_error_tracker()
         self.logger = logging.getLogger(__name__)
 
@@ -139,15 +150,18 @@ class HardenedBinanceFuturesClient:
                 'limit': limit
             }
 
-            response = await self.exchange.fapiPublicGetFuturesDataOpenInterestHist(params)
+            response = await self._fapi_get('/futures/data/openInterestHist', params)
 
             if not response:
                 raise ValueError("Empty OI response from exchange")
 
             df = pd.DataFrame(response)
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df['sumOpenInterest'] = df['sumOpenInterest'].astype(float)
-            df['sumOpenInterestValue'] = df['sumOpenInterestValue'].astype(float)
+            if not df.empty and 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            if 'sumOpenInterest' in df.columns:
+                df['sumOpenInterest'] = df['sumOpenInterest'].astype(float)
+            if 'sumOpenInterestValue' in df.columns:
+                df['sumOpenInterestValue'] = df['sumOpenInterestValue'].astype(float)
 
             return df
 
@@ -190,14 +204,16 @@ class HardenedBinanceFuturesClient:
             if start_time:
                 params['startTime'] = start_time
 
-            response = await self.exchange.fapiPublicGetFundingRate(params)
+            response = await self._fapi_get('/fapi/v1/fundingRate', params)
 
             if not response:
                 raise ValueError("Empty funding rate response")
 
             df = pd.DataFrame(response)
-            df['fundingTime'] = pd.to_datetime(df['fundingTime'], unit='ms')
-            df['fundingRate'] = df['fundingRate'].astype(float)
+            if not df.empty and 'fundingTime' in df.columns:
+                df['fundingTime'] = pd.to_datetime(df['fundingTime'], unit='ms')
+            if 'fundingRate' in df.columns:
+                df['fundingRate'] = df['fundingRate'].astype(float)
 
             return df
 
@@ -236,13 +252,15 @@ class HardenedBinanceFuturesClient:
                 'limit': limit
             }
 
-            response = await self.exchange.fapiPublicGetAllForceOrders(params)
+            response = await self._fapi_get('/fapi/v1/allForceOrders', params)
 
             df = pd.DataFrame(response) if response else pd.DataFrame()
 
-            if not df.empty:
+            if not df.empty and 'time' in df.columns:
                 df['time'] = pd.to_datetime(df['time'], unit='ms')
+            if 'price' in df.columns:
                 df['price'] = df['price'].astype(float)
+            if 'origQty' in df.columns:
                 df['origQty'] = df['origQty'].astype(float)
 
             return df
@@ -285,16 +303,20 @@ class HardenedBinanceFuturesClient:
                 'limit': limit
             }
 
-            response = await self.exchange.fapiPublicGetFuturesDataTopLongShortAccountRatio(params)
+            response = await self._fapi_get('/futures/data/topLongShortAccountRatio', params)
 
             if not response:
                 raise ValueError("Empty trader ratio response")
 
             df = pd.DataFrame(response)
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df['longShortRatio'] = df['longShortRatio'].astype(float)
-            df['longAccount'] = df['longAccount'].astype(float)
-            df['shortAccount'] = df['shortAccount'].astype(float)
+            if not df.empty and 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            if 'longShortRatio' in df.columns:
+                df['longShortRatio'] = df['longShortRatio'].astype(float)
+            if 'longAccount' in df.columns:
+                df['longAccount'] = df['longAccount'].astype(float)
+            if 'shortAccount' in df.columns:
+                df['shortAccount'] = df['shortAccount'].astype(float)
 
             return df
 

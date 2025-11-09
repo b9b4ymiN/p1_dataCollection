@@ -17,8 +17,11 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --user -r requirements.txt
+# Install Python dependencies into the image (system site-packages)
+# Avoid --user so packages end up in /usr/local and are available to the
+# non-root `appuser` in the final stage after copying /usr/local from the
+# builder stage.
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Production stage
 FROM python:3.11-slim
@@ -39,8 +42,9 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python dependencies from builder
-COPY --from=builder /root/.local /root/.local
+# Copy Python dependencies from builder (system location)
+# Packages installed without --user live under /usr/local in the builder.
+COPY --from=builder /usr/local /usr/local
 
 # Copy application code
 COPY --chown=appuser:appuser . .

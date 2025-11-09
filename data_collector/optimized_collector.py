@@ -9,9 +9,12 @@ from typing import List, Dict
 import pandas as pd
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text
+from sqlalchemy import create_engine as create_sync_engine
+from urllib.parse import quote_plus
 import logging
 from concurrent.futures import ThreadPoolExecutor
 import aiohttp
+from sqlalchemy.exc import IntegrityError
 
 from data_collector.binance_client import BinanceFuturesClient
 
@@ -34,8 +37,12 @@ class OptimizedDataCollector:
         """Initialize async resources"""
         # Create async database engine with connection pooling
         db_config = self.config['database']
+        # URL-encode username/password to support special characters
+        user_enc = quote_plus(db_config['user'])
+        password_enc = quote_plus(db_config['password'])
+
         connection_string = (
-            f"postgresql+asyncpg://{db_config['user']}:{db_config['password']}@"
+            f"postgresql+asyncpg://{user_enc}:{password_enc}@"
             f"{db_config['host']}:{db_config['port']}/{db_config['database']}"
         )
 
@@ -53,6 +60,16 @@ class OptimizedDataCollector:
             class_=AsyncSession,
             expire_on_commit=False
         )
+
+        # Create a separate synchronous engine for pandas.to_sql operations
+        # Pandas uses synchronous DB drivers; running to_sql in a threadpool
+        # against a sync engine avoids async/sync interoperability errors
+        # such as "greenlet_spawn has not been called".
+        sync_connection_string = (
+            f"postgresql+psycopg2://{user_enc}:{password_enc}@"
+            f"{db_config['host']}:{db_config['port']}/{db_config['database']}"
+        )
+        self.sync_engine = create_sync_engine(sync_connection_string, pool_size=20, max_overflow=40)
 
         # Initialize Binance client
         binance_config = self.config['binance']
@@ -90,6 +107,10 @@ class OptimizedDataCollector:
         tasks.append(('Funding', None, self.collect_funding_optimized(symbol, start_date, end_date)))
         tasks.append(('Liquidations', None, self.collect_liquidations_optimized(symbol, start_date, end_date)))
         tasks.append(('LS_Ratio', None, self.collect_ls_ratio_optimized(symbol, start_date, end_date)))
+        
+        # Add order book collection if enabled
+        if collection_config.get('collect_order_book', False):
+            tasks.append(('OrderBook', None, self.collect_order_book_optimized(symbol, start_date, end_date)))
 
         # Execute all tasks concurrently
         logger.info(f"🚀 Starting concurrent collection of {len(tasks)} data streams...")
@@ -183,7 +204,17 @@ class OptimizedDataCollector:
         """Optimized funding rate collection"""
         try:
             df = await self.client.fetch_funding_rate_history(symbol)
-            df = df[(df['fundingTime'] >= start_date) & (df['fundingTime'] <= end_date)]
+            # Support both API-style 'fundingTime' and normalized 'funding_time'
+            if 'fundingTime' in df.columns:
+                df['funding_time'] = pd.to_datetime(df['fundingTime'])
+            if 'funding_time' in df.columns:
+                df = df[(df['funding_time'] >= start_date) & (df['funding_time'] <= end_date)]
+            else:
+                # Fallback: try original column (if present)
+                if 'fundingTime' in df.columns:
+                    df = df[(df['fundingTime'] >= start_date) & (df['fundingTime'] <= end_date)]
+                else:
+                    df = pd.DataFrame()
 
             if not df.empty:
                 df['symbol'] = symbol
@@ -236,6 +267,50 @@ class OptimizedDataCollector:
 
         return total
 
+    async def collect_order_book_optimized(self, symbol: str, start_date: datetime, end_date: datetime):
+        """
+        Optimized order book collection
+        
+        Note: Order book data is high-frequency. This collects periodic snapshots
+        rather than continuous streaming (which would be handled by WebSocket).
+        """
+        order_book_config = self.config['collection'].get('order_book', {})
+        limit = order_book_config.get('limit', 100)
+        interval_seconds = order_book_config.get('interval_seconds', 60)  # Default: 1 snapshot per minute
+        
+        total = 0
+        
+        try:
+            # For historical range, collect snapshots at regular intervals
+            current_time = start_date
+            
+            while current_time <= end_date:
+                try:
+                    df = await self.client.fetch_order_book(symbol, limit=limit)
+                    
+                    if not df.empty:
+                        df['symbol'] = symbol
+                        # Use the current_time for historical consistency
+                        df['time'] = current_time
+                        await self._batch_insert_order_book(df)
+                        total += len(df)
+                    
+                    # Move to next interval
+                    current_time += timedelta(seconds=interval_seconds)
+                    
+                    # Rate limiting
+                    await asyncio.sleep(0.5)
+                    
+                except Exception as e:
+                    logger.warning(f"Error fetching order book snapshot at {current_time}: {e}")
+                    current_time += timedelta(seconds=interval_seconds)
+                    continue
+            
+        except Exception as e:
+            logger.error(f"Error in order book collection: {e}")
+        
+        return total
+
     async def _batch_insert_ohlcv(self, df: pd.DataFrame, symbol: str, timeframe: str):
         """High-speed batch insert for OHLCV"""
         df = df.copy()
@@ -265,6 +340,32 @@ class OptimizedDataCollector:
 
     async def _batch_insert_funding(self, df: pd.DataFrame):
         """High-speed batch insert for funding rate"""
+        df = df.copy()
+        # Normalize columns to match DB schema: funding_time, symbol, funding_rate, mark_price
+        if 'fundingTime' in df.columns and 'funding_time' not in df.columns:
+            df['funding_time'] = pd.to_datetime(df['fundingTime'])
+        if 'fundingRate' in df.columns and 'funding_rate' not in df.columns:
+            df['funding_rate'] = df['fundingRate'].astype(float)
+        if 'markPrice' in df.columns and 'mark_price' not in df.columns:
+            df['mark_price'] = df['markPrice']
+
+        # Ensure required columns exist
+        for col in ['funding_time', 'symbol', 'funding_rate', 'mark_price']:
+            if col not in df.columns:
+                df[col] = None
+
+        # Rename to DB-friendly names if necessary (to_sql will use these column names)
+        df = df.rename(columns={
+            'funding_time': 'funding_time',
+            'funding_rate': 'funding_rate',
+            'mark_price': 'mark_price'
+        })
+
+        # Remove any raw/camelCase API columns to avoid duplicate columns in SQL INSERT
+        for raw_col in ('fundingTime', 'fundingRate', 'markPrice'):
+            if raw_col in df.columns:
+                df.drop(columns=[raw_col], inplace=True)
+
         await self._execute_batch_insert('funding_rate', df)
 
     async def _batch_insert_liquidations(self, df: pd.DataFrame):
@@ -275,6 +376,19 @@ class OptimizedDataCollector:
         """High-speed batch insert for long/short ratio"""
         await self._execute_batch_insert('long_short_ratio', df)
 
+    async def _batch_insert_order_book(self, df: pd.DataFrame):
+        """High-speed batch insert for order book"""
+        df = df.copy()
+        
+        # Ensure all required columns are present
+        required_columns = ['time', 'symbol', 'side', 'price', 'quantity', 'last_update_id']
+        for col in required_columns:
+            if col not in df.columns:
+                logger.warning(f"Missing column {col} in order book data")
+                df[col] = None
+        
+        await self._execute_batch_insert('order_book', df)
+
     async def _execute_batch_insert(self, table_name: str, df: pd.DataFrame):
         """
         Execute optimized batch insert using COPY for maximum speed
@@ -282,25 +396,130 @@ class OptimizedDataCollector:
         if df.empty:
             return
 
-        async with self.session_factory() as session:
+        # Restrict DataFrame to only the columns that exist in the DB schema for the target table.
+        # This prevents accidental INSERT attempts for unexpected API fields (e.g. CamelCase or 3rd-party fields)
+        # which cause UndefinedColumn errors.
+        allowed_columns_map = {
+            'ohlcv': [
+                'time', 'symbol', 'timeframe', 'open', 'high', 'low', 'close', 'volume',
+                'quote_volume', 'num_trades', 'taker_buy_base', 'taker_buy_quote'
+            ],
+            'open_interest': ['time', 'symbol', 'period', 'open_interest', 'open_interest_value'],
+            'funding_rate': ['funding_time', 'symbol', 'funding_rate', 'mark_price'],
+            'liquidations': ['time', 'symbol', 'side', 'price', 'quantity', 'order_id'],
+            'long_short_ratio': ['time', 'symbol', 'period', 'long_short_ratio', 'long_account', 'short_account'],
+            'order_book': ['time', 'symbol', 'side', 'price', 'quantity', 'last_update_id']
+        }
+
+        allowed = allowed_columns_map.get(table_name)
+        if allowed:
+            # Keep only columns that are present in the DataFrame and in the allowed list
+            cols_to_keep = [c for c in allowed if c in df.columns]
+            df = df[cols_to_keep].copy()
+
+        # Remove duplicate rows within the batch based on likely primary-key columns
+        pk_map = {
+            'ohlcv': ['time', 'symbol', 'timeframe'],
+            'open_interest': ['time', 'symbol', 'period'],
+            'funding_rate': ['funding_time', 'symbol'],
+            'liquidations': ['time', 'symbol', 'order_id'],
+            'long_short_ratio': ['time', 'symbol', 'period'],
+            'order_book': ['time', 'symbol', 'side', 'price']
+        }
+
+        pk_cols = pk_map.get(table_name, [])
+        present_pk_cols = [c for c in pk_cols if c in df.columns]
+        if present_pk_cols:
+            df = df.drop_duplicates(subset=present_pk_cols, keep='first')
+
+        # If possible, query DB for existing primary-key tuples inside this batch time/window
+        # and filter them out to avoid UniqueViolation on bulk insert.
+        if present_pk_cols:
             try:
-                # Use pandas to_sql with method='multi' for batch insert
-                # Note: For even faster inserts, consider using COPY command
+                # Build where clauses for time range and symbol set to limit scan
+                where_clauses = []
+                params = {}
+                if 'time' in present_pk_cols or 'funding_time' in present_pk_cols:
+                    time_col = 'time' if 'time' in present_pk_cols else 'funding_time'
+                    min_time = df[time_col].min()
+                    max_time = df[time_col].max()
+                    where_clauses.append(f"{time_col} >= :min_time AND {time_col} <= :max_time")
+                    params['min_time'] = min_time
+                    params['max_time'] = max_time
+
+                if 'symbol' in present_pk_cols and 'symbol' in df.columns:
+                    symbols = df['symbol'].unique().tolist()
+                    # Use an array parameter for symbols
+                    where_clauses.append("symbol = ANY(:symbols)")
+                    params['symbols'] = symbols
+
+                if where_clauses:
+                    where_sql = ' AND '.join(where_clauses)
+                    cols_select = ', '.join(present_pk_cols)
+                    query = text(f"SELECT {cols_select} FROM {table_name} WHERE {where_sql}")
+
+                    async with self.session_factory() as session:
+                        result = await session.execute(query, params)
+                        existing = result.fetchall()
+
+                    if existing:
+                        # existing is list of tuples in same order as present_pk_cols
+                        existing_set = set(existing)
+                        # Build boolean mask to keep rows not present in DB
+                        tuples = list(df[present_pk_cols].itertuples(index=False, name=None))
+                        mask = [t not in existing_set for t in tuples]
+                        df = df[mask]
+            except Exception:
+                # If anything goes wrong querying DB, continue and rely on fallback handling below
+                logger.debug(f"Could not pre-check existing keys for {table_name}; will rely on safe insert fallback")
+
+        if df.empty:
+            logger.debug(f"No new rows to insert into {table_name} after dedupe/existing-filter")
+            return
+
+        # Insert in chunks and provide a fallback path to avoid bulk UniqueViolation failures.
+        chunk_size = 500
+        try:
+            for start in range(0, len(df), chunk_size):
+                chunk = df.iloc[start:start + chunk_size]
                 await asyncio.get_event_loop().run_in_executor(
                     self.executor,
-                    lambda: df.to_sql(
+                    lambda c=chunk: c.to_sql(
                         table_name,
-                        self.engine.sync_engine,
+                        self.sync_engine,
                         if_exists='append',
                         index=False,
                         method='multi',
-                        chunksize=1000
+                        chunksize=250
                     )
                 )
-                logger.debug(f"Inserted {len(df)} records into {table_name}")
-            except Exception as e:
-                logger.error(f"Batch insert error for {table_name}: {e}")
-                raise
+
+            logger.debug(f"Inserted {len(df)} records into {table_name}")
+        except IntegrityError as ie:
+            # Fall back to inserting row-by-row and ignore duplicates that conflict
+            logger.warning(f"IntegrityError during bulk insert on {table_name}: {ie}; falling back to row-wise insert")
+            for _, row in df.iterrows():
+                try:
+                    single_df = pd.DataFrame([row])
+                    await asyncio.get_event_loop().run_in_executor(
+                        self.executor,
+                        lambda c=single_df: c.to_sql(
+                            table_name,
+                            self.sync_engine,
+                            if_exists='append',
+                            index=False,
+                            method='multi'
+                        )
+                    )
+                except IntegrityError:
+                    # Likely a duplicate; ignore
+                    continue
+                except Exception as e:
+                    logger.error(f"Row-wise insert failed for {table_name}: {e}")
+            logger.info(f"Completed fallback insert for {table_name}")
+        except Exception as e:
+            logger.error(f"Batch insert error for {table_name}: {e}")
+            raise
 
     @staticmethod
     def _timeframe_to_minutes(tf: str) -> int:
